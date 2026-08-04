@@ -63,6 +63,7 @@ public class VoxelAsteroidGame {
         // Окно видно СРАЗУ, чтобы показать экран загрузки
         glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_SAMPLES, 4); // Сглаживание (MSAA x4)
 
         window = glfwCreateWindow(width, height, "Voxel Asteroid Engine (OpenWebStart Compatible)", MemoryUtil.NULL, MemoryUtil.NULL);
         if (window == MemoryUtil.NULL) {
@@ -122,12 +123,32 @@ public class VoxelAsteroidGame {
             "    p *= 17.0;\n" +
             "    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));\n" +
             "}\n" +
+            "// Гладкий value noise: непрерывное поле, без пиксельной ряби и мерцания\n" +
+            "float vnoise(vec3 p) {\n" +
+            "    vec3 i = floor(p);\n" +
+            "    vec3 f = fract(p);\n" +
+            "    vec3 u = f * f * (3.0 - 2.0 * f);\n" +
+            "    float n000 = hash(i);\n" +
+            "    float n100 = hash(i + vec3(1.0, 0.0, 0.0));\n" +
+            "    float n010 = hash(i + vec3(0.0, 1.0, 0.0));\n" +
+            "    float n110 = hash(i + vec3(1.0, 1.0, 0.0));\n" +
+            "    float n001 = hash(i + vec3(0.0, 0.0, 1.0));\n" +
+            "    float n101 = hash(i + vec3(1.0, 0.0, 1.0));\n" +
+            "    float n011 = hash(i + vec3(0.0, 1.0, 1.0));\n" +
+            "    float n111 = hash(i + vec3(1.0, 1.0, 1.0));\n" +
+            "    return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),\n" +
+            "               mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);\n" +
+            "}\n" +
             "void main() {\n" +
             "    vec3 N = normalize(vNormal);\n" +
-            "    vec3 cell = floor(vObjPos + 0.5);\n" +          // вариация цвета по вокселям
-            "    float n = hash(cell);\n" +
-            "    vec3 base = mix(vec3(0.35, 0.30, 0.26), vec3(0.58, 0.52, 0.46), n);\n" +
-            "    base *= 0.9 + 0.2 * hash(vObjPos * 7.0);\n" +    // мелкое зерно камня
+            "    // Постоянный цвет вокселя (не меняется внутри грани)\n" +
+            "    float cell = hash(floor(vObjPos + 0.5));\n" +
+            "    // Крупные гладкие пятна породы\n" +
+            "    float blotch = vnoise(vObjPos * 0.35);\n" +
+            "    // Мелкое гладкое зерно\n" +
+            "    float grain = vnoise(vObjPos * 1.3);\n" +
+            "    vec3 base = mix(vec3(0.34, 0.29, 0.25), vec3(0.58, 0.52, 0.46), cell * 0.55 + blotch * 0.45);\n" +
+            "    base *= 0.90 + 0.18 * grain;\n" +
             "    vec3 L = normalize(uLightDir);\n" +
             "    vec3 V = normalize(-vViewPos);\n" +
             "    vec3 H = normalize(L + V);\n" +
