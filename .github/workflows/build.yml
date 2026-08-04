@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
 
-# Выдаем явные права боту на публикацию в GitHub Pages
 permissions:
   contents: write
 
@@ -24,7 +23,12 @@ jobs:
       - name: Build Fat JAR with Maven
         run: mvn clean package
 
-      - name: Deploy JAR to GitHub Pages
+      - name: Copy JNLP and HTML to Output
+        run: |
+          cp game.jnlp target/ || true
+          cp index.html target/ || true
+
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
