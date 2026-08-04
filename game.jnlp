@@ -9,5 +9,5 @@
         <j2se version="17+" max-heap-size="4096m"/>
         <jar href="asteroid-game.jar" main="true"/>
     </resources>
-    <application-desc main-class="VoxelAsteroidGame"/>
+    <application-desc main-class="com.voxel.VoxelAsteroidGame"/>
 </jnlp>
