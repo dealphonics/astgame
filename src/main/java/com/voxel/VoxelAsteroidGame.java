@@ -19,13 +19,17 @@ import static org.lwjgl.opengl.GL20.*;
 
 public class VoxelAsteroidGame {
 
+    // Маркер сборки: виден в HUD и в консоли. Если после обновления
+    // в HUD нет этого номера — значит, OpenWebStart запустил СТАРЫЙ JAR из кэша.
+    private static final String BUILD = "BUILD 3";
+
     private long window;
     private int width = 1280;
     private int height = 720;
 
     // Параметры астероида
     private static final int GRID_SIZE = 32;
-    private List<Float> meshVertices;
+    private List<Float> meshVertices; // pos(3) + normal(3) + color(3) на вершину
     private int vertexCount;
     private int vbo;
 
@@ -92,7 +96,7 @@ public class VoxelAsteroidGame {
         if (caps.OpenGL20) {
             initShaders();
         }
-        System.out.println("Шейдеры: " + (useShaders ? "включены (GLSL)" : "отключены (фикс. конвейер)"));
+        System.out.println(BUILD + " | Шейдеры: " + (useShaders ? "включены (GLSL)" : "отключены (фикс. конвейер)"));
     }
 
     // ========== ШЕЙДЕРЫ ==========
@@ -101,29 +105,34 @@ public class VoxelAsteroidGame {
             "#version 120\n" +
             "attribute vec3 inPos;\n" +
             "attribute vec3 inNormal;\n" +
+            "attribute vec3 inColor;\n" +
             "varying vec3 vNormal;\n" +
             "varying vec3 vObjPos;\n" +
             "varying vec3 vViewPos;\n" +
+            "varying vec3 vColor;\n" +
             "void main() {\n" +
             "    vObjPos = inPos;\n" +
+            "    vColor = inColor;\n" +
             "    vNormal = gl_NormalMatrix * inNormal;\n" +
             "    vec4 vp = gl_ModelViewMatrix * vec4(inPos, 1.0);\n" +
             "    vViewPos = vp.xyz;\n" +
             "    gl_Position = gl_ModelViewProjectionMatrix * vec4(inPos, 1.0);\n" +
             "}\n";
 
+    // Цвет грани приходит готовым из VBO (константа на грань — мерцать нечему).
+    // В шейдере только ОЧЕНЬ низкочастотное гладкое пятно + освещение.
     private static final String FRAG_SRC =
             "#version 120\n" +
             "varying vec3 vNormal;\n" +
             "varying vec3 vObjPos;\n" +
             "varying vec3 vViewPos;\n" +
+            "varying vec3 vColor;\n" +
             "uniform vec3 uLightDir;\n" +
             "float hash(vec3 p) {\n" +
             "    p = fract(p * 0.3183099 + 0.1);\n" +
             "    p *= 17.0;\n" +
             "    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));\n" +
             "}\n" +
-            "// Гладкий value noise: непрерывное поле, без пиксельной ряби и мерцания\n" +
             "float vnoise(vec3 p) {\n" +
             "    vec3 i = floor(p);\n" +
             "    vec3 f = fract(p);\n" +
@@ -141,14 +150,9 @@ public class VoxelAsteroidGame {
             "}\n" +
             "void main() {\n" +
             "    vec3 N = normalize(vNormal);\n" +
-            "    // Постоянный цвет вокселя (не меняется внутри грани)\n" +
-            "    float cell = hash(floor(vObjPos + 0.5));\n" +
-            "    // Крупные гладкие пятна породы\n" +
-            "    float blotch = vnoise(vObjPos * 0.35);\n" +
-            "    // Мелкое гладкое зерно\n" +
-            "    float grain = vnoise(vObjPos * 1.3);\n" +
-            "    vec3 base = mix(vec3(0.34, 0.29, 0.25), vec3(0.58, 0.52, 0.46), cell * 0.55 + blotch * 0.45);\n" +
-            "    base *= 0.90 + 0.18 * grain;\n" +
+            "    // Крупные гладкие пятна породы (частота ~4 вокселя, без алиасинга)\n" +
+            "    float blotch = vnoise(vObjPos * 0.25);\n" +
+            "    vec3 base = vColor * (0.80 + 0.40 * blotch);\n" +
             "    vec3 L = normalize(uLightDir);\n" +
             "    vec3 V = normalize(-vViewPos);\n" +
             "    vec3 H = normalize(L + V);\n" +
@@ -171,6 +175,7 @@ public class VoxelAsteroidGame {
         glAttachShader(shaderProgram, fs);
         glBindAttribLocation(shaderProgram, 0, "inPos");
         glBindAttribLocation(shaderProgram, 1, "inNormal");
+        glBindAttribLocation(shaderProgram, 2, "inColor");
         glLinkProgram(shaderProgram);
         glDeleteShader(vs);
         glDeleteShader(fs);
@@ -249,7 +254,7 @@ public class VoxelAsteroidGame {
     // ========== ГЕНЕРАЦИЯ МЕША (инкрементально, с прогрессом) ==========
 
     private boolean generateAsteroidMesh() {
-        System.out.println("Генерация вокселей и построение 3D-сетки...");
+        System.out.println(BUILD + " | Генерация вокселей и построение 3D-сетки...");
         renderLoading(0.02f);
         if (glfwWindowShouldClose(window)) return false;
 
@@ -270,7 +275,8 @@ public class VoxelAsteroidGame {
             }
         }
 
-        // 2. Полигоны по срезам, с обновлением прогресс-бара
+        // 2. Полигоны по срезам, с обновлением прогресс-бара.
+        //    Цвет каждой грани запекается сразу (faceColor) — константа на всю грань.
         meshVertices = new ArrayList<>();
         int total = GRID_SIZE - 1;
         for (int x = 0; x < total; x++) {
@@ -278,12 +284,12 @@ public class VoxelAsteroidGame {
                 for (int z = 0; z < total; z++) {
                     if (density[x][y][z] > 0) {
                         float px = x - center, py = y - center, pz = z - center;
-                        if (x == 0 || density[x - 1][y][z] <= 0) addFace(px, py, pz, -1, 0, 0);
-                        if (x == GRID_SIZE - 1 || density[x + 1][y][z] <= 0) addFace(px, py, pz, 1, 0, 0);
-                        if (y == 0 || density[x][y - 1][z] <= 0) addFace(px, py, pz, 0, -1, 0);
-                        if (y == GRID_SIZE - 1 || density[x][y + 1][z] <= 0) addFace(px, py, pz, 0, 1, 0);
-                        if (z == 0 || density[x][y][z - 1] <= 0) addFace(px, py, pz, 0, 0, -1);
-                        if (z == GRID_SIZE - 1 || density[x][y][z + 1] <= 0) addFace(px, py, pz, 0, 0, 1);
+                        if (x == 0 || density[x - 1][y][z] <= 0) addFace(x, y, z, 0, px, py, pz, -1, 0, 0);
+                        if (x == GRID_SIZE - 1 || density[x + 1][y][z] <= 0) addFace(x, y, z, 1, px, py, pz, 1, 0, 0);
+                        if (y == 0 || density[y - 1 >= 0 ? y - 1 : 0][y][z] <= 0 && false || density[x][y - 1][z] <= 0) addFace(x, y, z, 2, px, py, pz, 0, -1, 0);
+                        if (y == GRID_SIZE - 1 || density[x][y + 1][z] <= 0) addFace(x, y, z, 3, px, py, pz, 0, 1, 0);
+                        if (z == 0 || density[x][y][z - 1] <= 0) addFace(x, y, z, 4, px, py, pz, 0, 0, -1);
+                        if (z == GRID_SIZE - 1 || density[x][y][z + 1] <= 0) addFace(x, y, z, 5, px, py, pz, 0, 0, 1);
                     }
                 }
             }
@@ -292,15 +298,29 @@ public class VoxelAsteroidGame {
                 if (glfwWindowShouldClose(window)) return false;
             }
         }
-        vertexCount = meshVertices.size() / 6;
+        vertexCount = meshVertices.size() / 9;
         System.out.println("Сгенерировано вертексов: " + vertexCount);
         renderLoading(1f);
         return true;
     }
 
-    private void addFace(float x, float y, float z, int nx, int ny, int nz) {
+    // Детерминированный цвет грани: одинаков для всех 6 вершин грани.
+    private float[] faceColor(int x, int y, int z, int dir) {
+        long seed = x * 73856093L ^ y * 19349663L ^ z * 83492791L ^ ((dir + 1) * 2654435761L);
+        Random r = new Random(seed);
+        float t = r.nextFloat();
+        float cr = 0.34f + 0.24f * t;
+        float cg = 0.29f + 0.23f * t;
+        float cb = 0.25f + 0.21f * t;
+        // Лёгкий оттеночный сдвиг по направлению грани, чтобы рельеф читался
+        float shade = 0.90f + 0.10f * (dir / 5.0f);
+        return new float[]{cr * shade, cg * shade, cb * shade};
+    }
+
+    private void addFace(int ix, int iy, int iz, int dir, float x, float y, float z, int nx, int ny, int nz) {
         float s = 0.5f;
         float[][] v = new float[4][3];
+        float[] col = faceColor(ix, iy, iz, dir);
 
         if (nx == 1) v = new float[][]{{x+s,y-s,z-s},{x+s,y+s,z-s},{x+s,y+s,z+s},{x+s,y-s,z+s}};
         else if (nx == -1) v = new float[][]{{x-s,y-s,z+s},{x-s,y+s,z+s},{x-s,y+s,z-s},{x-s,y-s,z-s}};
@@ -309,13 +329,14 @@ public class VoxelAsteroidGame {
         else if (nz == 1) v = new float[][]{{x-s,y-s,z+s},{x+s,y-s,z+s},{x+s,y+s,z+s},{x-s,y+s,z+s}};
         else if (nz == -1) v = new float[][]{{x-s,y+s,z-s},{x+s,y+s,z-s},{x+s,y-s,z-s},{x-s,y-s,z-s}};
 
-        addVertex(v[0], nx, ny, nz); addVertex(v[1], nx, ny, nz); addVertex(v[2], nx, ny, nz);
-        addVertex(v[0], nx, ny, nz); addVertex(v[2], nx, ny, nz); addVertex(v[3], nx, ny, nz);
+        addVertex(v[0], nx, ny, nz, col); addVertex(v[1], nx, ny, nz, col); addVertex(v[2], nx, ny, nz, col);
+        addVertex(v[0], nx, ny, nz, col); addVertex(v[2], nx, ny, nz, col); addVertex(v[3], nx, ny, nz, col);
     }
 
-    private void addVertex(float[] pos, float nx, float ny, float nz) {
+    private void addVertex(float[] pos, float nx, float ny, float nz, float[] col) {
         meshVertices.add(pos[0]); meshVertices.add(pos[1]); meshVertices.add(pos[2]);
         meshVertices.add(nx); meshVertices.add(ny); meshVertices.add(nz);
+        meshVertices.add(col[0]); meshVertices.add(col[1]); meshVertices.add(col[2]);
     }
 
     private void buildVBO() {
@@ -363,33 +384,40 @@ public class VoxelAsteroidGame {
                 glUseProgram(shaderProgram);
                 glUniform3f(locLight, 0.5f, 0.8f, 0.6f);
             } else {
-                glColor3f(0.55f, 0.5f, 0.45f);
                 glEnable(GL_LIGHTING);
                 glEnable(GL_LIGHT0);
                 glEnable(GL_COLOR_MATERIAL);
+                glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
             }
 
+            // pos(3) + normal(3) + color(3) = 9 float = 36 байт
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             if (useShaders) {
                 glEnableVertexAttribArray(0);
-                glVertexAttribPointer(0, 3, GL_FLOAT, false, 24, 0);
+                glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, 0);
                 glEnableVertexAttribArray(1);
-                glVertexAttribPointer(1, 3, GL_FLOAT, false, 24, 12);
+                glVertexAttribPointer(1, 3, GL_FLOAT, false, 36, 12);
+                glEnableVertexAttribArray(2);
+                glVertexAttribPointer(2, 3, GL_FLOAT, false, 36, 24);
             } else {
                 glEnableClientState(GL_VERTEX_ARRAY);
                 glEnableClientState(GL_NORMAL_ARRAY);
-                glVertexPointer(3, GL_FLOAT, 24, 0);
-                glNormalPointer(GL_FLOAT, 24, 12);
+                glEnableClientState(GL_COLOR_ARRAY);
+                glVertexPointer(3, GL_FLOAT, 36, 0);
+                glNormalPointer(GL_FLOAT, 36, 12);
+                glColorPointer(3, GL_FLOAT, 36, 24);
             }
             glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 
             if (useShaders) {
                 glDisableVertexAttribArray(0);
                 glDisableVertexAttribArray(1);
+                glDisableVertexAttribArray(2);
                 glUseProgram(0);
             } else {
                 glDisableClientState(GL_VERTEX_ARRAY);
                 glDisableClientState(GL_NORMAL_ARRAY);
+                glDisableClientState(GL_COLOR_ARRAY);
                 glDisable(GL_LIGHTING);
             }
             glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -435,7 +463,7 @@ public class VoxelAsteroidGame {
 
         drawString("DRAG: ROTATE   WHEEL: ZOOM   SPACE: AUTO " + (autoRotate ? "ON" : "OFF"),
                 12, 30, 2.5f, 0.7f, 0.75f, 0.8f);
-        drawString(useShaders ? "RENDER: SHADERS" : "RENDER: FIXED",
+        drawString((useShaders ? "RENDER: SHADERS   " : "RENDER: FIXED   ") + BUILD,
                 12, 52, 2.5f, 0.45f, 0.6f, 0.7f);
 
         glMatrixMode(GL_PROJECTION);
