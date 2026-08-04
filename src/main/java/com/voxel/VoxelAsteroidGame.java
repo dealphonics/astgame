@@ -19,9 +19,8 @@ import static org.lwjgl.opengl.GL20.*;
 
 public class VoxelAsteroidGame {
 
-    // Маркер сборки: виден в HUD и в консоли. Если после обновления
-    // в HUD нет этого номера — значит, OpenWebStart запустил СТАРЫЙ JAR из кэша.
-    private static final String BUILD = "BUILD 3";
+    // Маркер сборки: виден в HUD. Если после обновления его нет — запущен СТАРЫЙ JAR из кэша.
+    private static final String BUILD = "BUILD 4";
 
     private long window;
     private int width = 1280;
@@ -29,17 +28,29 @@ public class VoxelAsteroidGame {
 
     // Параметры астероида
     private static final int GRID_SIZE = 32;
-    private List<Float> meshVertices; // pos(3) + normal(3) + color(3) на вершину
+    private static final float CENTER = GRID_SIZE / 2.0f;
+    private static final float FOV = 45.0f;
+    private static final float Z_NEAR = 0.1f;
+    private static final float Z_FAR = 200.0f;
+
+    private float[][][] density;              // изменяемое состояние мира
+    private List<Float> meshVertices;         // pos(3) + normal(3) + color(3) на вершину
     private int vertexCount;
+    private int solidCount;
     private int vbo;
 
     // Камера и управление
     private float rotX = -20f;
     private float rotY = 30f;
     private float zoom = 30f;
-    private boolean autoRotate = true;
+    private boolean autoRotate = false;       // по умолчанию ВЫКЛ, чтобы удобно строить
     private double lastMouseX, lastMouseY;
-    private boolean wasLeftDown, wasSpaceDown;
+    private boolean wasLeftDown, wasRightDown, wasSpaceDown;
+    private double plx, ply, prx, pry;        // позиции нажатия для отличия клика от драга
+
+    // Прицел (рейкаст)
+    private int[] lastHit;
+    private int[] lastPrev;
 
     // Шейдеры
     private boolean useShaders;
@@ -53,7 +64,6 @@ public class VoxelAsteroidGame {
             cleanup();
             return;
         }
-        buildVBO();
         glfwSetWindowTitle(window, "Voxel Asteroid Engine");
         mainLoop();
         cleanup();
@@ -64,7 +74,6 @@ public class VoxelAsteroidGame {
             throw new IllegalStateException("Не удалось инициализировать GLFW");
         }
 
-        // Окно видно СРАЗУ, чтобы показать экран загрузки
         glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         glfwWindowHint(GLFW_SAMPLES, 4); // Сглаживание (MSAA x4)
@@ -119,8 +128,6 @@ public class VoxelAsteroidGame {
             "    gl_Position = gl_ModelViewProjectionMatrix * vec4(inPos, 1.0);\n" +
             "}\n";
 
-    // Цвет грани приходит готовым из VBO (константа на грань — мерцать нечему).
-    // В шейдере только ОЧЕНЬ низкочастотное гладкое пятно + освещение.
     private static final String FRAG_SRC =
             "#version 120\n" +
             "varying vec3 vNormal;\n" +
@@ -150,7 +157,6 @@ public class VoxelAsteroidGame {
             "}\n" +
             "void main() {\n" +
             "    vec3 N = normalize(vNormal);\n" +
-            "    // Крупные гладкие пятна породы (частота ~4 вокселя, без алиасинга)\n" +
             "    float blotch = vnoise(vObjPos * 0.25);\n" +
             "    vec3 base = vColor * (0.80 + 0.40 * blotch);\n" +
             "    vec3 L = normalize(uLightDir);\n" +
@@ -218,7 +224,6 @@ public class VoxelAsteroidGame {
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
 
-        // Фон
         glColor3f(0.02f, 0.02f, 0.05f);
         glBegin(GL_QUADS);
         glVertex2f(0, 0); glVertex2f(W, 0); glVertex2f(W, H); glVertex2f(0, H);
@@ -231,7 +236,6 @@ public class VoxelAsteroidGame {
         String sub = "GENERATING VOXEL MESH " + (int) (progress * 100) + "%";
         drawString(sub, (W - sub.length() * 4 * (px * 0.75f)) / 2f, H * 0.56f, px * 0.75f, 0.6f, 0.6f, 0.68f);
 
-        // Прогресс-бар
         float bw = W * 0.6f, bh = 18;
         float bx = (W - bw) / 2f, by = H * 0.44f;
         glColor3f(0.35f, 0.35f, 0.42f);
@@ -251,23 +255,21 @@ public class VoxelAsteroidGame {
         glfwPollEvents();
     }
 
-    // ========== ГЕНЕРАЦИЯ МЕША (инкрементально, с прогрессом) ==========
+    // ========== ГЕНЕРАЦИЯ И ПЕРЕСБОРКА МЕША ==========
 
     private boolean generateAsteroidMesh() {
         System.out.println(BUILD + " | Генерация вокселей и построение 3D-сетки...");
         renderLoading(0.02f);
         if (glfwWindowShouldClose(window)) return false;
 
-        float[][][] density = new float[GRID_SIZE][GRID_SIZE][GRID_SIZE];
+        density = new float[GRID_SIZE][GRID_SIZE][GRID_SIZE];
         SimplexNoise noise = new SimplexNoise(12345L);
-        float center = GRID_SIZE / 2.0f;
         float radius = 10.0f;
 
-        // 1. Заполнение 3D карты плотности
         for (int x = 0; x < GRID_SIZE; x++) {
             for (int y = 0; y < GRID_SIZE; y++) {
                 for (int z = 0; z < GRID_SIZE; z++) {
-                    float dx = x - center, dy = y - center, dz = z - center;
+                    float dx = x - CENTER, dy = y - CENTER, dz = z - CENTER;
                     float dist = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
                     float n = noise.eval(x * 0.1, y * 0.1, z * 0.1) * 4.0f;
                     density[x][y][z] = (radius + n) - dist;
@@ -275,36 +277,41 @@ public class VoxelAsteroidGame {
             }
         }
 
-        // 2. Полигоны по срезам, с обновлением прогресс-бара.
-        //    Цвет каждой грани запекается сразу (faceColor) — константа на всю грань.
+        buildFaces();
+        buildVBO();
+        renderLoading(1f);
+        return true;
+    }
+
+    // Построение граней из текущей сетки плотности (используется и при пересборке)
+    private void buildFaces() {
         meshVertices = new ArrayList<>();
-        int total = GRID_SIZE - 1;
-        for (int x = 0; x < total; x++) {
-            for (int y = 0; y < total; y++) {
-                for (int z = 0; z < total; z++) {
+        solidCount = 0;
+        for (int x = 0; x < GRID_SIZE; x++) {
+            for (int y = 0; y < GRID_SIZE; y++) {
+                for (int z = 0; z < GRID_SIZE; z++) {
                     if (density[x][y][z] > 0) {
-                        float px = x - center, py = y - center, pz = z - center;
+                        solidCount++;
+                        float px = x - CENTER, py = y - CENTER, pz = z - CENTER;
                         if (x == 0 || density[x - 1][y][z] <= 0) addFace(x, y, z, 0, px, py, pz, -1, 0, 0);
                         if (x == GRID_SIZE - 1 || density[x + 1][y][z] <= 0) addFace(x, y, z, 1, px, py, pz, 1, 0, 0);
-                        if (y == 0 || density[y - 1 >= 0 ? y - 1 : 0][y][z] <= 0 && false || density[x][y - 1][z] <= 0) addFace(x, y, z, 2, px, py, pz, 0, -1, 0);
+                        if (y == 0 || density[x][y - 1][z] <= 0) addFace(x, y, z, 2, px, py, pz, 0, -1, 0);
                         if (y == GRID_SIZE - 1 || density[x][y + 1][z] <= 0) addFace(x, y, z, 3, px, py, pz, 0, 1, 0);
                         if (z == 0 || density[x][y][z - 1] <= 0) addFace(x, y, z, 4, px, py, pz, 0, 0, -1);
                         if (z == GRID_SIZE - 1 || density[x][y][z + 1] <= 0) addFace(x, y, z, 5, px, py, pz, 0, 0, 1);
                     }
                 }
             }
-            if (x % 4 == 3) {
-                renderLoading(0.05f + 0.95f * (x + 1) / total);
-                if (glfwWindowShouldClose(window)) return false;
-            }
         }
         vertexCount = meshVertices.size() / 9;
-        System.out.println("Сгенерировано вертексов: " + vertexCount);
-        renderLoading(1f);
-        return true;
     }
 
-    // Детерминированный цвет грани: одинаков для всех 6 вершин грани.
+    private void rebuildMesh() {
+        buildFaces();
+        buildVBO();
+    }
+
+    // Детерминированный цвет грани: одинаков для всех 6 вершин грани
     private float[] faceColor(int x, int y, int z, int dir) {
         long seed = x * 73856093L ^ y * 19349663L ^ z * 83492791L ^ ((dir + 1) * 2654435761L);
         Random r = new Random(seed);
@@ -312,7 +319,6 @@ public class VoxelAsteroidGame {
         float cr = 0.34f + 0.24f * t;
         float cg = 0.29f + 0.23f * t;
         float cb = 0.25f + 0.21f * t;
-        // Лёгкий оттеночный сдвиг по направлению грани, чтобы рельеф читался
         float shade = 0.90f + 0.10f * (dir / 5.0f);
         return new float[]{cr * shade, cg * shade, cb * shade};
     }
@@ -343,12 +349,97 @@ public class VoxelAsteroidGame {
         FloatBuffer fb = BufferUtils.createFloatBuffer(meshVertices.size());
         for (float f : meshVertices) fb.put(f);
         fb.flip();
-        meshVertices = null; // больше не нужен
+        meshVertices = null;
 
+        if (vbo != 0) glDeleteBuffers(vbo);
         vbo = glGenBuffers();
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    // ========== РЕЙКАСТ (DDA по воксельной сетке) ==========
+
+    private static float[] rotXV(float[] v, float deg) {
+        float r = (float) Math.toRadians(deg), c = (float) Math.cos(r), s = (float) Math.sin(r);
+        return new float[]{v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c};
+    }
+
+    private static float[] rotYV(float[] v, float deg) {
+        float r = (float) Math.toRadians(deg), c = (float) Math.cos(r), s = (float) Math.sin(r);
+        return new float[]{v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c};
+    }
+
+    private void updateTarget() {
+        lastHit = null;
+        lastPrev = null;
+
+        int[] fw = new int[1], fh = new int[1];
+        glfwGetFramebufferSize(window, fw, fh);
+        int W = Math.max(fw[0], 1), H = Math.max(fh[0], 1);
+        double[] mx = new double[1], my = new double[1];
+        glfwGetCursorPos(window, mx, my);
+
+        // Луч в view-space через пиксель под курсором
+        float nx = (float) (2.0 * mx[0] / W - 1.0);
+        float ny = (float) (1.0 - 2.0 * my[0] / H);
+        float fh2 = (float) Math.tan(Math.toRadians(FOV / 2)) * Z_NEAR;
+        float fw2 = fh2 * ((float) W / H);
+
+        float dx = nx * fw2, dy = ny * fh2, dz = -Z_NEAR;
+        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        float[] rd = {dx / len, dy / len, dz / len};
+
+        // Перевод луча в object-space: p_obj = Ry(-rotY) * Rx(-rotX) * T(+zoom) * p_view
+        float[] o = rotYV(rotXV(new float[]{0, 0, zoom}, -rotX), -rotY);
+        float[] d = rotYV(rotXV(rd, -rotX), -rotY);
+
+        // Сдвигаем в пространство, где границы ячеек — целые числа
+        float ux = o[0] + CENTER + 0.5f, uy = o[1] + CENTER + 0.5f, uz = o[2] + CENTER + 0.5f;
+        int x = (int) Math.floor(ux), y = (int) Math.floor(uy), z = (int) Math.floor(uz);
+        int sx = d[0] > 0 ? 1 : -1, sy = d[1] > 0 ? 1 : -1, sz = d[2] > 0 ? 1 : -1;
+        float tdx = d[0] != 0 ? Math.abs(1f / d[0]) : Float.MAX_VALUE;
+        float tdy = d[1] != 0 ? Math.abs(1f / d[1]) : Float.MAX_VALUE;
+        float tdz = d[2] != 0 ? Math.abs(1f / d[2]) : Float.MAX_VALUE;
+        float tmx = d[0] != 0 ? (d[0] > 0 ? (x + 1 - ux) : (ux - x)) * tdx : Float.MAX_VALUE;
+        float tmy = d[1] != 0 ? (d[1] > 0 ? (y + 1 - uy) : (uy - y)) * tdy : Float.MAX_VALUE;
+        float tmz = d[2] != 0 ? (d[2] > 0 ? (z + 1 - uz) : (uz - z)) * tdz : Float.MAX_VALUE;
+
+        int[] prev = null;
+        float t = 0;
+        for (int i = 0; i < 400 && t < 300; i++) {
+            if (x >= 0 && y >= 0 && z >= 0 && x < GRID_SIZE && y < GRID_SIZE && z < GRID_SIZE
+                    && density[x][y][z] > 0) {
+                lastHit = new int[]{x, y, z};
+                lastPrev = prev;
+                return;
+            }
+            prev = new int[]{x, y, z};
+            if (tmx <= tmy && tmx <= tmz) { x += sx; t = tmx; tmx += tdx; }
+            else if (tmy <= tmz) { y += sy; t = tmy; tmy += tdy; }
+            else { z += sz; t = tmz; tmz += tdz; }
+        }
+    }
+
+    private boolean inBounds(int x, int y, int z) {
+        return x >= 0 && y >= 0 && z >= 0 && x < GRID_SIZE && y < GRID_SIZE && z < GRID_SIZE;
+    }
+
+    private void mine() {
+        updateTarget();
+        if (lastHit != null && density[lastHit[0]][lastHit[1]][lastHit[2]] > 0) {
+            density[lastHit[0]][lastHit[1]][lastHit[2]] = -1;
+            rebuildMesh();
+        }
+    }
+
+    private void buildBlock() {
+        updateTarget();
+        if (lastPrev != null && inBounds(lastPrev[0], lastPrev[1], lastPrev[2])
+                && density[lastPrev[0]][lastPrev[1]][lastPrev[2]] <= 0) {
+            density[lastPrev[0]][lastPrev[1]][lastPrev[2]] = 1;
+            rebuildMesh();
+        }
     }
 
     // ========== ГЛАВНЫЙ ЦИКЛ ==========
@@ -356,6 +447,7 @@ public class VoxelAsteroidGame {
     private void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             handleInput();
+            updateTarget();
 
             int[] fw = new int[1], fh = new int[1];
             glfwGetFramebufferSize(window, fw, fh);
@@ -367,12 +459,10 @@ public class VoxelAsteroidGame {
             // Перспектива 3D камеры
             glMatrixMode(GL_PROJECTION);
             glLoadIdentity();
-            float fov = 45.0f;
             float aspect = (float) W / H;
-            float zNear = 0.1f, zFar = 200.0f;
-            float fh2 = (float) Math.tan(Math.toRadians(fov / 2)) * zNear;
+            float fh2 = (float) Math.tan(Math.toRadians(FOV / 2)) * Z_NEAR;
             float fw2 = fh2 * aspect;
-            glFrustum(-fw2, fw2, -fh2, fh2, zNear, zFar);
+            glFrustum(-fw2, fw2, -fh2, fh2, Z_NEAR, Z_FAR);
 
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
@@ -422,6 +512,7 @@ public class VoxelAsteroidGame {
             }
             glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+            drawHighlight();
             drawHud(W, H);
 
             glfwSwapBuffers(window);
@@ -429,17 +520,63 @@ public class VoxelAsteroidGame {
         }
     }
 
+    // Жёлтая рамка вокруг вокселя под прицелом
+    private void drawHighlight() {
+        if (lastHit == null) return;
+        glDisable(GL_LIGHTING);
+        glUseProgram(0);
+        glColor3f(1.0f, 0.9f, 0.3f);
+        float h = 0.502f;
+        float cx = lastHit[0] - CENTER, cy = lastHit[1] - CENTER, cz = lastHit[2] - CENTER;
+        float x0 = cx - h, x1 = cx + h, y0 = cy - h, y1 = cy + h, z0 = cz - h, z1 = cz + h;
+        glBegin(GL_LINES);
+        // нижняя грань
+        glVertex3f(x0,y0,z0); glVertex3f(x1,y0,z0);
+        glVertex3f(x1,y0,z0); glVertex3f(x1,y0,z1);
+        glVertex3f(x1,y0,z1); glVertex3f(x0,y0,z1);
+        glVertex3f(x0,y0,z1); glVertex3f(x0,y0,z0);
+        // верхняя грань
+        glVertex3f(x0,y1,z0); glVertex3f(x1,y1,z0);
+        glVertex3f(x1,y1,z0); glVertex3f(x1,y1,z1);
+        glVertex3f(x1,y1,z1); glVertex3f(x0,y1,z1);
+        glVertex3f(x0,y1,z1); glVertex3f(x0,y1,z0);
+        // вертикали
+        glVertex3f(x0,y0,z0); glVertex3f(x0,y1,z0);
+        glVertex3f(x1,y0,z0); glVertex3f(x1,y1,z0);
+        glVertex3f(x1,y0,z1); glVertex3f(x1,y1,z1);
+        glVertex3f(x0,y0,z1); glVertex3f(x0,y1,z1);
+        glEnd();
+    }
+
     private void handleInput() {
-        // Мышь: перетаскивание = вращение
         double[] mx = new double[1], my = new double[1];
         glfwGetCursorPos(window, mx, my);
         boolean left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-        if (left && wasLeftDown) {
+        boolean right = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+
+        // Запоминаем позицию нажатия
+        if (left && !wasLeftDown) { plx = mx[0]; ply = my[1 - 1]; }
+        if (right && !wasRightDown) { prx = mx[0]; pry = my[0]; pry = my[1]; }
+
+        // Клик (без драга): ЛКМ — майнинг, ПКМ — строительство
+        if (!left && wasLeftDown) {
+            double ddx = mx[0] - plx, ddy = my[0] - ply;
+            if (ddx * ddx + ddy * ddy < 36) mine();
+        }
+        if (!right && wasRightDown) {
+            double ddx = mx[0] - prx, ddy = my[0] - pry;
+            if (ddx * ddx + ddy * ddy < 36) buildBlock();
+        }
+
+        // Вращение камеры перетаскиванием (любой кнопкой)
+        boolean held = (left && wasLeftDown) || (right && wasRightDown);
+        if (held) {
             rotY += (mx[0] - lastMouseX) * 0.4f;
             rotX += (my[0] - lastMouseY) * 0.4f;
             rotX = Math.max(-89f, Math.min(89f, rotX));
         }
         wasLeftDown = left;
+        wasRightDown = right;
         lastMouseX = mx[0];
         lastMouseY = my[0];
 
@@ -461,9 +598,10 @@ public class VoxelAsteroidGame {
         glPushMatrix();
         glLoadIdentity();
 
-        drawString("DRAG: ROTATE   WHEEL: ZOOM   SPACE: AUTO " + (autoRotate ? "ON" : "OFF"),
+        drawString("LMB: MINE   RMB: BUILD   DRAG: ROTATE   WHEEL: ZOOM",
                 12, 30, 2.5f, 0.7f, 0.75f, 0.8f);
-        drawString((useShaders ? "RENDER: SHADERS   " : "RENDER: FIXED   ") + BUILD,
+        drawString("SPACE: AUTO " + (autoRotate ? "ON" : "OFF") + "   VOXELS: " + solidCount +
+                "   " + (useShaders ? "SHADERS" : "FIXED") + "   " + BUILD,
                 12, 52, 2.5f, 0.45f, 0.6f, 0.7f);
 
         glMatrixMode(GL_PROJECTION);
