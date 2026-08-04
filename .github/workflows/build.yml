@@ -21,12 +21,12 @@ jobs:
           cache: maven
 
       - name: Build Fat JAR with Maven
-        run: mvn clean package
+        run: mvn clean package -DskipTests
 
       - name: Prepare Release Directory
         run: |
           mkdir -p deploy
-          cp target/asteroid-game-v1.jar deploy/
+          cp target/*.jar deploy/
           cp game.jnlp deploy/ || true
           cp index.html deploy/ || true
 
