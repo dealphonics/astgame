@@ -54,7 +54,7 @@
     </dependencies>
 
     <build>
-        <finalName>asteroid-game</finalName>
+        <finalName>asteroid-game-v1</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -65,6 +65,7 @@
                         <phase>package</phase>
                         <goals><goal>shade</goal></goals>
                         <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.voxel.VoxelAsteroidGame</mainClass>
