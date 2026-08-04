@@ -20,7 +20,7 @@ import static org.lwjgl.opengl.GL20.*;
 public class VoxelAsteroidGame {
 
     // Маркер сборки: виден в HUD. Если после обновления его нет — запущен СТАРЫЙ JAR из кэша.
-    private static final String BUILD = "BUILD 4";
+    private static final String BUILD = "BUILD 5";
 
     private long window;
     private int width = 1280;
@@ -554,9 +554,9 @@ public class VoxelAsteroidGame {
         boolean left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
         boolean right = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
-        // Запоминаем позицию нажатия
-        if (left && !wasLeftDown) { plx = mx[0]; ply = my[1 - 1]; }
-        if (right && !wasRightDown) { prx = mx[0]; pry = my[0]; pry = my[1]; }
+        // Запоминаем позицию нажатия (ИСПРАВЛЕНО: только my[0], массив имеет длину 1)
+        if (left && !wasLeftDown) { plx = mx[0]; ply = my[0]; }
+        if (right && !wasRightDown) { prx = mx[0]; pry = my[0]; }
 
         // Клик (без драга): ЛКМ — майнинг, ПКМ — строительство
         if (!left && wasLeftDown) {
