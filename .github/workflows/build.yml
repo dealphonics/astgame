@@ -23,13 +23,15 @@ jobs:
       - name: Build Fat JAR with Maven
         run: mvn clean package
 
-      - name: Copy JNLP and HTML to Output
+      - name: Prepare Release Directory
         run: |
-          cp game.jnlp target/ || true
-          cp index.html target/ || true
+          mkdir -p deploy
+          cp target/asteroid-game.jar deploy/
+          cp game.jnlp deploy/ || true
+          cp index.html deploy/ || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./target
+          publish_dir: ./deploy
