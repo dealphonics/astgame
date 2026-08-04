@@ -1,3 +1,5 @@
+package com.voxel;
+
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.*;
 import org.lwjgl.system.MemoryUtil;
@@ -118,11 +120,11 @@ public class VoxelAsteroidGame {
         float s = 0.5f;
         float[][] v = new float[4][3];
 
-        if (nx == 1)      v = new float[][]{{x+s,y-s,z-s},{x+s,y+s,z-s},{x+s,y+s,z+s},{x+s,y-s,z+s}};
+        if (nx == 1) v = new float[][]{{x+s,y-s,z-s},{x+s,y+s,z-s},{x+s,y+s,z+s},{x+s,y-s,z+s}};
         else if (nx == -1) v = new float[][]{{x-s,y-s,z+s},{x-s,y+s,z+s},{x-s,y+s,z-s},{x-s,y-s,z-s}};
-        else if (ny == 1)  v = new float[][]{{x-s,y+s,z-s},{x-s,y+s,z+s},{x+s,y+s,z+s},{x+s,y+s,z-s}};
+        else if (ny == 1) v = new float[][]{{x-s,y+s,z-s},{x-s,y+s,z+s},{x+s,y+s,z+s},{x+s,y+s,z-s}};
         else if (ny == -1) v = new float[][]{{x-s,y-s,z+s},{x-s,y-s,z-s},{x+s,y-s,z-s},{x+s,y-s,z+s}};
-        else if (nz == 1)  v = new float[][]{{x-s,y-s,z+s},{x+s,y-s,z+s},{x+s,y+s,z+s},{x-s,y+s,z+s}};
+        else if (nz == 1) v = new float[][]{{x-s,y-s,z+s},{x+s,y-s,z+s},{x+s,y+s,z+s},{x-s,y+s,z+s}};
         else if (nz == -1) v = new float[][]{{x-s,y+s,z-s},{x+s,y+s,z-s},{x+s,y-s,z-s},{x-s,y-s,z-s}};
 
         // Треугольник 1
@@ -138,7 +140,7 @@ public class VoxelAsteroidGame {
 
     private void addVertex(float[] pos, float nx, float ny, float nz) {
         meshVertices.add(pos[0]); meshVertices.add(pos[1]); meshVertices.add(pos[2]);
-        meshVertices.add(nx);     meshVertices.add(ny);     meshVertices.add(nz);
+        meshVertices.add(nx); meshVertices.add(ny); meshVertices.add(nz);
     }
 
     private void mainLoop() {
@@ -207,9 +209,9 @@ public class VoxelAsteroidGame {
             int A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
             int B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
             return (float) l(w, l(v, l(u, g(p[AA], x, y, z), g(p[BA], x - 1, y, z)),
-                                   l(u, g(p[AB], x, y - 1, z), g(p[BB], x - 1, y - 1, z))),
-                           l(v, l(u, g(p[AA + 1], x, y, z - 1), g(p[BA + 1], x - 1, y, z - 1)),
-                                   l(u, g(p[AB + 1], x, y - 1, z - 1), g(p[BB + 1], x - 1, y - 1, z - 1))));
+                    l(u, g(p[AB], x, y - 1, z), g(p[BB], x - 1, y - 1, z))),
+                    l(v, l(u, g(p[AA + 1], x, y, z - 1), g(p[BA + 1], x - 1, y, z - 1)),
+                    l(u, g(p[AB + 1], x, y - 1, z - 1), g(p[BB + 1], x - 1, y - 1, z - 1))));
         }
         private double f(double t) { return t * t * t * (t * (t * 6 - 15) + 10); }
         private double l(double t, double a, double b) { return a + t * (b - a); }
