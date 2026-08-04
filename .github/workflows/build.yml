@@ -26,7 +26,7 @@ jobs:
       - name: Prepare Release Directory
         run: |
           mkdir -p deploy
-          cp target/asteroid-game.jar deploy/
+          cp target/asteroid-game-v1.jar deploy/
           cp game.jnlp deploy/ || true
           cp index.html deploy/ || true
 
