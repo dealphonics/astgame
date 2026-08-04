@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<jnlp spec="1.0+" codebase="https://dealphonics.github.io/astgame/">
+<jnlp spec="1.0+" codebase="https://dealphonics.github.io/astgame/" href="game.jnlp">
     <information>
         <title>Voxel Asteroid Engine</title>
         <vendor>dealphonics</vendor>
         <description>3D Игра запущенная через GitHub и OpenWebStart</description>
     </information>
+    
+    <security>
+        <all-permissions/>
+    </security>
+    
     <resources>
         <j2se version="17+" max-heap-size="4096m"/>
         <jar href="asteroid-game-v1.jar" main="true"/>
     </resources>
+    
     <application-desc main-class="com.voxel.VoxelAsteroidGame"/>
 </jnlp>
